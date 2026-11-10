@@ -12,6 +12,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from .color import COLOR_MODES, color_correct, compand, decompand
+
 # Bayer layouts, named by the colors of the top-left 2x2 block read row by row.
 PATTERNS = ("RGGB", "BGGR", "GRBG", "GBRG")
 
@@ -66,16 +68,33 @@ def demosaic(raw: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     return np.stack(channels, axis=-1)
 
 
-def demosaic_file(src: Path, dst: Path, pattern: str = "RGGB", quality: int = 95) -> None:
-    """Read a raw Bayer image from ``src`` and save the color result to ``dst``."""
+def demosaic_file(
+    src: Path, dst: Path, pattern: str = "RGGB", quality: int = 95, color: str = "raw"
+) -> None:
+    """Read a raw Bayer image from ``src`` and save the color result to ``dst``.
+
+    ``color`` is one of ``COLOR_MODES``: "raw" keeps the camera's companded
+    values, while "natural" and "white-balanced" apply the color corrections
+    described in ``mastcam_demosaic.color``.
+    """
+    if color not in COLOR_MODES:
+        raise ValueError(f"unknown color mode {color!r}, expected one of {COLOR_MODES}")
+
     with Image.open(src) as img:
-        if img.mode.startswith("I;16"):
-            raw, scale = np.asarray(img), 257.0
+        # Pillow opens 16-bit grayscale as "I;16*" or (e.g. for PNG) 32-bit "I".
+        if img.mode == "I" or img.mode.startswith("I;16"):
+            raw, scale = np.asarray(img).astype(np.uint16), 257.0
         else:
             raw, scale = np.asarray(img.convert("L")), 1.0
 
-    # Pillow cannot write 16-bit RGB, so 16-bit input is scaled down to 8 bits.
-    rgb = demosaic(raw, pattern) / scale
+    if color == "raw":
+        # Pillow cannot write 16-bit RGB, so 16-bit input is scaled down to 8 bits.
+        rgb = demosaic(raw, pattern) / scale
+    else:
+        if raw.dtype != np.uint8:
+            raise ValueError(f"{color} color requires an 8-bit companded MastCam image")
+        # Interpolate in linear space, then convert back to companded values.
+        rgb = compand(color_correct(demosaic(decompand(raw), pattern), color))
     out = Image.fromarray(np.clip(np.rint(rgb), 0, 255).astype(np.uint8), "RGB")
 
     save_kwargs = {}

@@ -35,6 +35,23 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Bayer layout of the top-left 2x2 pixels (default: %(default)s, "
         "as used by MastCam)",
     )
+    colors = parser.add_mutually_exclusive_group()
+    colors.add_argument(
+        "--natural",
+        dest="color",
+        action="store_const",
+        const="natural",
+        help="calibrate to estimated natural color: the scene as it would "
+        "look to a person standing on Mars",
+    )
+    colors.add_argument(
+        "--white-balanced",
+        dest="color",
+        action="store_const",
+        const="white-balanced",
+        help="calibrate and white balance: the terrain as it would look "
+        "under Earth-like lighting",
+    )
     parser.add_argument(
         "-q",
         "--quality",
@@ -56,7 +73,9 @@ def main(argv=None) -> int:
         return 1
 
     try:
-        demosaic_file(src, dst, pattern=args.pattern, quality=args.quality)
+        demosaic_file(
+            src, dst, pattern=args.pattern, quality=args.quality, color=args.color or "raw"
+        )
     except (OSError, ValueError) as exc:
         print(f"mastcam-demosaic: error: {exc}", file=sys.stderr)
         return 1
